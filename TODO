@@ -3,4 +3,5 @@
 
 [観測] firefox等のアプリケーションの終了時、システム全体が終了してしまう。
 -> DestroyNotify時、destroy-target-window = None をコメントアウトすればどうか
-
+-> 結果 : むりだった
+除去対象を絞り込む(詳細は関数:snmt_delete_window()のコメントにて)ことで最終的に解決。やった〜

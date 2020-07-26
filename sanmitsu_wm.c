@@ -11,82 +11,20 @@ XEvent    snmt_event;       // イベントの受け皿
 const unsigned int titlebar_width_margin = 25; // タイトルバーの右端の開幅  = Exitボタンの幅
 const unsigned int titlebar_height       = 25; // タイトルバーの高さ       = Exitボタンの高さ
 
-// 色の取得
-unsigned long snmt_color(char * _color) {
+// 色の取得を行う関数。
+unsigned long snmt_color(const char * _color);
 
-    XColor near_color, true_color;
-    XAllocNamedColor(snmt_display,
-                     DefaultColormap(snmt_display, 0), _color,
-                     &near_color, &true_color);
-
-    return BlackPixel(snmt_display,0)^near_color.pixel;
-
-}
+// ウインドウがboxかを調べる関数。
+Bool snmt_window_is_box(const Window);
 
 // 新しいウインドウにboxやexitを追加する関数。
-Bool snmt_box_new_window(){
+Bool snmt_box_new_window();
 
-    Window
-        group_app = snmt_event.xmap.window,
-        group_box,
-        group_exit;
+// boxウインドウの消去を試みる関数。
+Bool snmt_delete_window(const Window, Window *);
 
-    // appのAttributes取得
-    XWindowAttributes targ_attr;
-    XGetWindowAttributes(snmt_display, group_app, &targ_attr);
-
-    // boxのAttributes取得
-    XSetWindowAttributes box_exit_attr;
-    box_exit_attr.override_redirect = True;
-
-    // boxを作成
-    group_box = XCreateWindow(
-        snmt_display,
-        snmt_root_window,
-        targ_attr.x,
-        targ_attr.y,
-        targ_attr.width,
-        targ_attr.height + titlebar_height,
-        0,
-        0,
-        InputOutput,
-        CopyFromParent,
-        CWOverrideRedirect,
-        &box_exit_attr
-    );
-
-    // boxの詳細設定
-    XDefineCursor(snmt_display, group_box, XCreateFontCursor(snmt_display, 90));
-    XSetWindowBackground(snmt_display, group_box, snmt_color("orange"));
-    XReparentWindow(snmt_display, group_app, group_box, 0, titlebar_height);
-    XMapWindow(snmt_display, group_box);
-    XSelectInput(snmt_display, group_box, SubstructureNotifyMask);
-    
-    // exitを作成
-    group_exit = XCreateWindow(
-        snmt_display,
-        group_box,
-        targ_attr.x + targ_attr.width - titlebar_width_margin,
-        targ_attr.y,
-        titlebar_width_margin,
-        titlebar_height,
-        0,
-        0,
-        InputOutput,
-        CopyFromParent,
-        CWOverrideRedirect,
-        &box_exit_attr
-    );
-
-    // exitの詳細設定
-    XDefineCursor(snmt_display, group_exit, XCreateFontCursor(snmt_display, 90));
-    XSetWindowBackground(snmt_display, group_exit, snmt_color("red"));
-    XMapWindow(snmt_display, group_exit);
-    XSelectInput(snmt_display, group_exit, None);
-
-    return True;
-}
-
+// boxウインドウのリサイズを行う関数。
+Bool snmt_resize();
 
 int main(){
 
@@ -107,6 +45,7 @@ int main(){
                 True,
                 ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
                 GrabModeAsync, GrabModeAsync, None, None);
+
     XGrabButton(snmt_display,
                 3, Mod1Mask,
                 snmt_root_window, True,
@@ -124,8 +63,8 @@ int main(){
 
     //===
 
-    // 除去されるウインドウを格納。DestroyNotifyの項にて利用。
-    Window destroy_target_window = None;
+    // 最後に除去されたウインドウを格納。DestroyNotifyの項にて利用。
+    Window last_destroyed_window = None;
 
     // メインループ
     while(1){
@@ -134,45 +73,36 @@ int main(){
 
         switch (snmt_event.type){
 
-            // ウインドウが新しくマッピングされた時
-            case MapNotify:
-
-                // override_redirectな奴に用はない。
-                // boxウインドウやexitウインドウを作成する関数:snmt_box_new_window()を呼び出す。
-                if(snmt_event.xmap.override_redirect == False)
-                    snmt_box_new_window();
-
+            // ウインドウが新しくマップされた時
+            case MapNotify:                
+                // boxウインドウやexitウインドウを作成する関数。
+                snmt_box_new_window();
                 break;
 
             // ウインドウが除去された時
             case DestroyNotify:
-            {
-                // 除去対象である(されない可能性もある)ウインドウ。以下の処理で、boxウインドウであるかを確認し、除去判定をする。
-                const Window destroy_request_window = snmt_event.xdestroywindow.event;
-
-                //　除去対象がない？？信じられない、死になさい(無慈悲)!!!!!
-                if(destroy_request_window == None) break;
-
-                // DestroyNotifyが"最初に"呼び出される場合、そのウインドウはboxウインドウである。
-                // 逆に最初ではない場合(box自体が除去される時のNotifyなど)は、以下の条件にて無視することになる。
-                if(destroy_request_window == destroy_target_window){
-                    destroy_target_window = None;
-                    break;
-                }
-
-                // boxウインドウを除去。
-                XDestroyWindow(snmt_display, destroy_request_window);
-                destroy_target_window = destroy_request_window;
-
-            }
+                // 以下の関数で、除去対象がboxウインドウであるかを確認し、除去判定をする。
+                snmt_delete_window(snmt_event.xdestroywindow.event, &last_destroyed_window);
                 break;
 
+            // ウインドウが移動/拡縮された時
+            case ConfigureNotify:
+                snmt_resize();    
+                break;
 
             // ボタンが押された時
             case ButtonPress:
                 grip_info = snmt_event.xbutton;
-                if(grip_info.subwindow == None) break;
-                XGetWindowAttributes(snmt_display, grip_info.subwindow, &grip_attributes);
+
+                if(grip_info.subwindow != None && snmt_window_is_box(grip_info.subwindow)){
+                    XRaiseWindow(snmt_display, grip_info.subwindow);
+                    XGetWindowAttributes(snmt_display, grip_info.subwindow, &grip_attributes);
+                }
+                else if(grip_info.window != None){
+                    XDestroyWindow(snmt_display, grip_info.window);
+                    //snmt_delete_window(grip_info.window, &last_destroyed_window);
+                }
+
                 break;
             
             // ボタンが離された時
@@ -210,5 +140,166 @@ int main(){
                 break;
         }
     }
+    return 1;
 }
 
+// 色の取得を行う関数。
+unsigned long snmt_color(const char * _color) {
+
+    XColor near_color, true_color;
+    XAllocNamedColor(snmt_display,
+                     DefaultColormap(snmt_display, 0), _color,
+                     &near_color, &true_color);
+
+    return BlackPixel(snmt_display,0)^near_color.pixel;
+
+}
+
+// ウインドウがboxかを調べる関数。
+inline Bool snmt_window_is_box(const Window _target){
+    Window root, parent, * child;
+    unsigned int nchild;
+    XQueryTree(snmt_display, _target, &root, &parent, &child, &nchild);
+
+    return root == parent;
+}
+
+// 新しいウインドウにboxやexitを追加する関数。
+Bool snmt_box_new_window(){
+    
+    // override_redirectな奴に用はない。
+    if(snmt_event.xmap.override_redirect == True) return False;
+
+    Window
+        group_app = snmt_event.xmap.window,
+        group_box,
+        group_exit;
+
+    // appのAttributes取得
+    XWindowAttributes targ_attr;
+    XGetWindowAttributes(snmt_display, group_app, &targ_attr);
+
+    // boxのAttributes設定
+    XSetWindowAttributes box_attr;
+    box_attr.override_redirect = True;
+
+    // boxを作成
+    group_box = XCreateWindow(
+        snmt_display,
+        snmt_root_window,
+        targ_attr.x,
+        targ_attr.y,
+        targ_attr.width,
+        targ_attr.height + titlebar_height,
+        0,
+        0,
+        InputOutput,
+        CopyFromParent,
+        CWOverrideRedirect,
+        &box_attr
+    );
+
+    // boxの詳細設定
+    XDefineCursor(snmt_display, group_box, XCreateFontCursor(snmt_display, 90));
+    XSetWindowBackground(snmt_display, group_box, snmt_color("orange"));
+    XSetWindowBorderWidth(snmt_display, group_box, 3);
+    XReparentWindow(snmt_display, group_app, group_box, 0, titlebar_height);
+    XMapWindow(snmt_display, group_box);
+    XSelectInput(snmt_display, group_box, SubstructureNotifyMask);
+    
+    XSetWindowAttributes exit_attr;
+    exit_attr.override_redirect = True;
+    
+    
+    // exitを作成
+    group_exit = XCreateWindow(
+        snmt_display,
+        group_box,
+        targ_attr.x + targ_attr.width - titlebar_width_margin,
+        targ_attr.y,
+        titlebar_width_margin,
+        titlebar_height,
+        0,
+        0,
+        InputOutput,
+        CopyFromParent,
+        CWOverrideRedirect,
+        &exit_attr
+    );
+
+    // exitの詳細設定
+    XDefineCursor(snmt_display, group_exit, XCreateFontCursor(snmt_display, 90));
+    XSetWindowBackground(snmt_display, group_exit, snmt_color("red"));
+    XMapWindow(snmt_display, group_exit);
+    XSelectInput(snmt_display, group_exit, ButtonPressMask);
+
+    XGrabButton(snmt_display,
+                1, Mod1Mask, group_exit,
+                True, ButtonPressMask,
+                GrabModeAsync, GrabModeAsync, None, None);
+                
+    return True;
+}
+
+// boxウインドウの消去を試みる関数。
+Bool snmt_delete_window(const Window _destroy_request_window, Window * _last_destroyed_window){
+
+    //　除去対象がない？？信じられない、死になさい(無慈悲)!!!!!
+    if(_destroy_request_window == None) return False;
+
+    // 最後に除去されたウインドウと同じウインドウが除去されようとしている場合、退出。
+    if(_destroy_request_window == *_last_destroyed_window) return False;
+
+    // 除去対象が根ウインドウと直結されていた場合(親=根だった場合)、boxウインドウを除去。
+    if(snmt_window_is_box(_destroy_request_window)){
+        *_last_destroyed_window = _destroy_request_window;
+        Window root, parent, * child;
+        unsigned int nchild;
+        XQueryTree(snmt_display, _destroy_request_window, &root, &parent, &child, &nchild);
+
+        XEvent event;
+        event.xclient.type = ClientMessage;
+        event.xclient.message_type = XInternAtom(snmt_display, "WM_PROTOCOLS", True);
+        event.xclient.format = 32;
+        event.xclient.data.l[0] = XInternAtom(snmt_display, "WM_DELETE_WINDOW", True);
+        event.xclient.data.l[1] = CurrentTime;
+
+        for(unsigned int ci=0;ci<nchild;ci++){
+            event.xclient.window = child[ci];
+            XSendEvent(snmt_display, child[ci], False, NoEventMask, &event);
+        }
+
+        // unmapでごまかしているが、これはDestroyがうまくいかなかったため...許して！
+        XUnmapWindow(snmt_display, _destroy_request_window);
+        
+    }
+    return True;
+}
+
+// boxウインドウのリサイズを行う関数。
+Bool snmt_resize(){
+
+    if(snmt_event.xconfigure.window == None) return False;
+
+    Window root, parent, * child;
+    unsigned int nchild;
+    XQueryTree(snmt_display, snmt_event.xconfigure.window, &root, &parent, &child, &nchild);
+
+    for(unsigned int ci = 0; ci<nchild; ci++){
+
+        XWindowAttributes child_attr;
+        XGetWindowAttributes(snmt_display, child[ci], &child_attr);
+
+        if(child_attr.override_redirect == False){
+            XResizeWindow(snmt_display, child[ci],
+                snmt_event.xconfigure.width,
+                snmt_event.xconfigure.height - titlebar_height);
+        }
+        else{
+            XMoveWindow(snmt_display, child[ci],
+                snmt_event.xconfigure.width - titlebar_width_margin, 0);
+        }
+    }
+
+    return True;
+}
