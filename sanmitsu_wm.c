@@ -1,6 +1,7 @@
 
 
 #include <X11/Xlib.h>
+#include <X11/cursorfont.h>
 
 #define MAX(A,B) ((A) > (B) ? (A) : (B))
 
@@ -34,6 +35,9 @@ int main(){
 
     // 根ウインドウ
     snmt_root_window = RootWindow(snmt_display, 0);
+    
+    // 根ウインドウに対してカーソルを設定
+    XDefineCursor(snmt_display, snmt_root_window, XCreateFontCursor(snmt_display, XC_plus));
 
     // 根ウインドウに渡されるイベント
     XSelectInput(snmt_display, snmt_root_window,
@@ -200,7 +204,7 @@ Bool snmt_box_new_window(){
     );
 
     // boxの詳細設定
-    XDefineCursor(snmt_display, group_box, XCreateFontCursor(snmt_display, 90));
+    XDefineCursor(snmt_display, group_box, XCreateFontCursor(snmt_display, XC_plus));
     XSetWindowBackground(snmt_display, group_box, snmt_color("orange"));
     XSetWindowBorderWidth(snmt_display, group_box, 3);
     XReparentWindow(snmt_display, group_app, group_box, 0, titlebar_height);
@@ -228,7 +232,7 @@ Bool snmt_box_new_window(){
     );
 
     // exitの詳細設定
-    XDefineCursor(snmt_display, group_exit, XCreateFontCursor(snmt_display, 90));
+    XDefineCursor(snmt_display, group_exit, XCreateFontCursor(snmt_display, XC_plus));
     XSetWindowBackground(snmt_display, group_exit, snmt_color("red"));
     XMapWindow(snmt_display, group_exit);
     XSelectInput(snmt_display, group_exit, ButtonPressMask);
